@@ -99,29 +99,25 @@ export default function Services() {
     const ctx = gsap.context(() => {
       const cards = cardsRef.current.filter(Boolean);
       
-      // Staggered 3D scroll entrance
       cards.forEach((card, i) => {
         gsap.fromTo(
           card,
           {
             opacity: 0,
-            y: 70,
-            scale: 0.94,
-            rotateX: 10,
+            y: 55,
+            scale: 0.95,
           },
           {
             opacity: 1,
             y: 0,
             scale: 1,
-            rotateX: 0,
-            duration: 0.8,
-            ease: "power3.out",
+            duration: 0.75,
+            delay: (i % 3) * 0.12,
+            ease: "power2.out",
             scrollTrigger: {
               trigger: card,
-              start: "top 90%",
-              end: "top 60%",
-              scrub: 0.5,
-              toggleActions: "play none none reverse",
+              start: "top 88%",
+              toggleActions: "play none none none",
             },
           }
         );

@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { motion, useScroll, useTransform } from "framer-motion";
 import { ArrowRight, Sparkles, Terminal, Flame } from "lucide-react";
 
 const lines = [
@@ -9,6 +9,10 @@ const lines = [
 const ease = [0.16, 1, 0.3, 1] as const;
 
 export default function Hero({ ready }: { ready: boolean }) {
+  const { scrollY } = useScroll();
+  const yContent = useTransform(scrollY, [0, 600], [0, -40]);
+  const opacityHero = useTransform(scrollY, [0, 500], [1, 0.25]);
+
   const fade = (d: number) => ({
     initial: { opacity: 0, y: 24 },
     animate: ready ? { opacity: 1, y: 0 } : {},
@@ -17,9 +21,10 @@ export default function Hero({ ready }: { ready: boolean }) {
 
   return (
     <section id="home" className="relative flex min-h-[100svh] flex-col justify-between pb-12 pt-32 md:pt-40">
-      <div className="shell relative z-10 my-auto">
+      <motion.div style={{ y: yContent, opacity: opacityHero }} className="shell relative z-10 my-auto">
         {/* Live Status Pill */}
         <motion.div {...fade(0.4)} className="mb-6 flex flex-wrap items-center gap-3">
+
           <div className="inline-flex items-center gap-2.5 rounded-full border border-flame/30 bg-surface/70 px-4 py-1.5 text-xs font-semibold text-ink backdrop-blur-md shadow-glass">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-flame opacity-75" />
@@ -35,7 +40,7 @@ export default function Hero({ ready }: { ready: boolean }) {
         </motion.div>
 
         {/* Main Title with Staggered Word Reveal */}
-        <h1 className="h-display max-w-3xl lg:max-w-[58%] text-[clamp(3rem,8vw,7.5rem)] leading-[0.92]">
+        <h1 className="h-display max-w-3xl lg:max-w-[58%] text-[clamp(2.4rem,8vw,7.5rem)] leading-[0.92] overflow-hidden">
           {lines.map((ln, li) => (
             <span key={li} className={`block ${li === 2 ? "ember-text" : ""}`}>
               {ln.map((w, wi) => (
@@ -90,7 +95,7 @@ export default function Hero({ ready }: { ready: boolean }) {
             </span>
           ))}
         </motion.div>
-      </div>
+      </motion.div>
 
       {/* Bottom Metrics Bar */}
       <div className="shell relative z-10 mt-12">

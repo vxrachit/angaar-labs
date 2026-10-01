@@ -1,11 +1,11 @@
-﻿import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { sc } from "../lib/scroll";
 
 const rnd = Math.random;
 
 // ─────────────────────────────────────────────────────────────────
-// Flame silhouette sampler (accurate Angaar shape)
+// Signature Angaar Flame 3D Volumetric Sculptor
 // ─────────────────────────────────────────────────────────────────
 function inFlame(x: number, y: number): boolean {
   if (y < -1.0 || y > 1.55 || Math.abs(x) > 1.0) return false;
@@ -46,151 +46,171 @@ function sampleFlameContour(n: number): [number, number][] {
   return pts;
 }
 
-function buildFlameCloud(n: number): Float32Array {
-  const arr = new Float32Array(n * 3);
+function buildFlameCloud(n: number): { restPos: Float32Array; scatterPos: Float32Array } {
+  const restPos = new Float32Array(n * 3);
+  const scatterPos = new Float32Array(n * 3);
   let count = 0;
-  // 40% on contour — makes outline crisp
-  const contourPts = sampleFlameContour(Math.floor(n * 0.40));
+
+  // 38% on contour — crisp, sharp geometric flame silhouette
+  const contourCount = Math.floor(n * 0.38);
+  const contourPts = sampleFlameContour(contourCount);
   for (const [cx, cy] of contourPts) {
     if (count >= n) break;
-    arr[count * 3]     = cx + (rnd() - 0.5) * 0.035;
-    arr[count * 3 + 1] = cy + (rnd() - 0.5) * 0.035;
-    arr[count * 3 + 2] = (rnd() - 0.5) * 0.20;
+    const zOffset = (rnd() - 0.5) * 0.24;
+    restPos[count * 3]     = cx + (rnd() - 0.5) * 0.025;
+    restPos[count * 3 + 1] = cy + (rnd() - 0.5) * 0.025;
+    restPos[count * 3 + 2] = zOffset;
     count++;
   }
-  // 60% interior fill
+
+  // 62% volumetric interior — sculpted 3D dome with true depth
   let tries = 0;
-  while (count < n && tries < n * 35) {
+  while (count < n && tries < n * 40) {
     tries++;
     const x = (rnd() - 0.5) * 2.1;
     const y = rnd() * 2.55 - 1.0;
     if (!inFlame(x, y)) continue;
-    const d = Math.max(0.05, (1 - Math.abs(x) / 0.9) * 0.70);
-    arr[count * 3]     = x;
-    arr[count * 3 + 1] = y;
-    arr[count * 3 + 2] = (rnd() - 0.5) * d;
+
+    const normH = Math.max(0, Math.min(1, (y + 1.0) / 2.55));
+    // Core has sculpted 3D thickness that tapers toward the edges and tip
+    const maxZ = Math.sin(normH * Math.PI) * 0.55 + 0.10;
+    const z = (rnd() - 0.5) * maxZ * (1.1 - Math.abs(x) * 0.7);
+
+    restPos[count * 3]     = x;
+    restPos[count * 3 + 1] = y;
+    restPos[count * 3 + 2] = z;
     count++;
   }
-  return arr;
+
+  // Scatter positions (expansive cosmic ember galaxy on scroll)
+  for (let i = 0; i < n; i++) {
+    const angle = (rnd() - 0.5) * Math.PI * 2.4;
+    const dist  = 1.2 + rnd() * 12.0;
+    const rise  = rnd() * rnd() * 8.0;
+    scatterPos[i * 3]     = Math.sin(angle) * dist;
+    scatterPos[i * 3 + 1] = rise - 2.0 + (rnd() - 0.5) * 3.5;
+    scatterPos[i * 3 + 2] = Math.cos(angle) * dist * 0.6 - 2.0 - rnd() * 4.5;
+  }
+
+  return { restPos, scatterPos };
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Per-particle "home" = rest position in flame, "away" = drifted
-// We'll lerp between them based on scroll
+// Professional Awwwards-Tier 3D Particle Flame Engine
 // ─────────────────────────────────────────────────────────────────
-export default function Scene3D() {
+export default function Scene3D({ onReady }: { onReady?: () => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
-    const M = window.innerWidth < 768;
+
+    let M = window.innerWidth < 768;
     const R = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     // ── Renderer ──────────────────────────────────────────────────
     const renderer = new THREE.WebGLRenderer({
-      canvas: cv, antialias: true, alpha: false,
+      canvas: cv,
+      antialias: false,
+      alpha: false,
       powerPreference: "high-performance",
     });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+
+    const updatePixelRatio = () => {
+      M = window.innerWidth < 768;
+      renderer.setPixelRatio(M ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 2));
+    };
+    updatePixelRatio();
     renderer.setClearColor(0x070605, 1);
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
-    camera.position.z = 7.0;
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
+    camera.position.z = M ? 6.4 : 7.0;
 
     const resize = () => {
-      renderer.setSize(innerWidth, innerHeight, false);
-      camera.aspect = innerWidth / innerHeight;
+      updatePixelRatio();
+      renderer.setSize(window.innerWidth, window.innerHeight, false);
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.position.z = window.innerWidth < 768 ? 6.4 : 7.0;
       camera.updateProjectionMatrix();
     };
     resize();
-    window.addEventListener("resize", resize);
+    window.addEventListener("resize", resize, { passive: true });
 
-    // ── Particle budget ───────────────────────────────────────────
-    const N = M ? 5000 : 11000;
+    // ── Particle Budget ───────────────────────────────────────────
+    const N = M ? 5200 : 12000;
 
-    // ── Build rest positions (flame shape) ────────────────────────
-    const restPos = buildFlameCloud(N); // the logo home
-
-    // ── Build "explode" scatter positions ─────────────────────────
-    // Each particle has a unique ember destination — a wide field
-    const scatterPos = new Float32Array(N * 3);
-    for (let i = 0; i < N; i++) {
-      // Embers scatter in a wide cone upward and sideways
-      const angle = (rnd() - 0.5) * Math.PI * 2.4;
-      const dist  = 1.0 + rnd() * 14.0;
-      const rise  = rnd() * rnd() * 8.0; // biased upward
-      scatterPos[i * 3]     = Math.sin(angle) * dist;
-      scatterPos[i * 3 + 1] = rise - 2.0 + (rnd() - 0.5) * 4.0;
-      scatterPos[i * 3 + 2] = Math.cos(angle) * dist * 0.5 - 2.0 - rnd() * 5;
-    }
-
-    // ── Live position buffer (CPU-interpolated) ───────────────────
-    const livePos = new Float32Array(N * 3);
-    for (let k = 0; k < N * 3; k++) livePos[k] = restPos[k];
+    // ── Generate 3D Rest & Scatter Coordinates ────────────────────
+    const { restPos, scatterPos } = buildFlameCloud(N);
 
     // ── Per-particle attributes ───────────────────────────────────
     const aColor  = new Float32Array(N * 3);
     const aSize   = new Float32Array(N);
     const aPhase  = new Float32Array(N);
     const aSpeed  = new Float32Array(N);
-    const aHeight = new Float32Array(N); // 0=base, 1=tip — for fire physics
+    const aHeight = new Float32Array(N);
 
-    const cWhiteHot = new THREE.Color(1.00, 0.98, 0.88);
-    const cGold     = new THREE.Color(1.00, 0.78, 0.08);
-    const cAmber    = new THREE.Color(1.00, 0.42, 0.01);
-    const cEmber    = new THREE.Color(0.86, 0.14, 0.00);
-    const cDeep     = new THREE.Color(0.55, 0.06, 0.00);
+    const cWhiteHot = new THREE.Color(1.00, 0.98, 0.92);
+    const cGold     = new THREE.Color(1.00, 0.82, 0.14);
+    const cAmber    = new THREE.Color(1.00, 0.48, 0.02);
+    const cEmber    = new THREE.Color(0.88, 0.18, 0.00);
+    const cDeep     = new THREE.Color(0.52, 0.06, 0.00);
 
     for (let i = 0; i < N; i++) {
-      const isContour = i < Math.floor(N * 0.40);
-      // Height-based color (use rest Y position)
-      const ry = restPos[i * 3 + 1]; // -1.0 → +1.55
+      const isContour = i < Math.floor(N * 0.38);
+      const ry = restPos[i * 3 + 1];
       const h  = Math.max(0, Math.min(1, (ry + 1.0) / 2.55));
       aHeight[i] = h;
 
       const c = new THREE.Color();
-      if      (h > 0.82) c.copy(cGold).lerp(cWhiteHot, (h - 0.82) / 0.18);
-      else if (h > 0.55) c.copy(cAmber).lerp(cGold,    (h - 0.55) / 0.27);
-      else if (h > 0.28) c.copy(cEmber).lerp(cAmber,   (h - 0.28) / 0.27);
-      else               c.copy(cDeep).lerp(cEmber,    h / 0.28);
+      if      (h > 0.80) c.copy(cGold).lerp(cWhiteHot, (h - 0.80) / 0.20);
+      else if (h > 0.50) c.copy(cAmber).lerp(cGold,    (h - 0.50) / 0.30);
+      else if (h > 0.24) c.copy(cEmber).lerp(cAmber,   (h - 0.24) / 0.26);
+      else               c.copy(cDeep).lerp(cEmber,    h / 0.24);
 
-      // Contour gets slightly hotter look
-      if (isContour) c.lerp(cAmber, 0.25);
+      if (isContour) c.lerp(cAmber, 0.22);
 
       aColor[i * 3]     = c.r;
       aColor[i * 3 + 1] = c.g;
       aColor[i * 3 + 2] = c.b;
 
-      // Tip particles are smaller (sharp tip), belly is bigger
       const belly = Math.sin(h * Math.PI);
-      aSize[i]  = (M ? 0.058 : 0.050) * (isContour ? 1.30 : 0.80) * (0.6 + belly * 0.7 + rnd() * 0.4);
+      const baseScale = M ? 0.044 : 0.048;
+      aSize[i]  = baseScale * (isContour ? 1.30 : 0.88) * (0.70 + belly * 0.65 + rnd() * 0.30);
       aPhase[i] = rnd() * Math.PI * 2;
-      aSpeed[i] = 0.5 + rnd() * 1.2;
+      aSpeed[i] = 0.65 + rnd() * 1.25;
     }
 
-    // ── Geometry ──────────────────────────────────────────────────
+    // ── GPU Geometry ──────────────────────────────────────────────
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(livePos,  3));
-    geo.setAttribute("aColor",   new THREE.BufferAttribute(aColor,   3));
-    geo.setAttribute("aSize",    new THREE.BufferAttribute(aSize,    1));
-    geo.setAttribute("aPhase",   new THREE.BufferAttribute(aPhase,   1));
-    geo.setAttribute("aSpeed",   new THREE.BufferAttribute(aSpeed,   1));
-    geo.setAttribute("aHeight",  new THREE.BufferAttribute(aHeight,  1));
+    geo.setAttribute("position",    new THREE.BufferAttribute(restPos, 3));
+    geo.setAttribute("aScatterPos", new THREE.BufferAttribute(scatterPos, 3));
+    geo.setAttribute("aColor",      new THREE.BufferAttribute(aColor, 3));
+    geo.setAttribute("aSize",       new THREE.BufferAttribute(aSize, 1));
+    geo.setAttribute("aPhase",      new THREE.BufferAttribute(aPhase, 1));
+    geo.setAttribute("aSpeed",      new THREE.BufferAttribute(aSpeed, 1));
+    geo.setAttribute("aHeight",     new THREE.BufferAttribute(aHeight, 1));
 
-    // ── Shader ────────────────────────────────────────────────────
+    // ── Custom 3D Shaders with Scroll & Velocity Morphing ─────────
     const mat = new THREE.ShaderMaterial({
       uniforms: {
         uTime:       { value: 0 },
-        uPixelRatio: { value: Math.min(devicePixelRatio, 2) },
-        uScatter:    { value: 0 }, // 0=flame logo, 1=fully scattered
+        uPixelRatio: { value: M ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 2) },
+        uScatter:    { value: 0 },
+        uScroll:     { value: 0 },
+        uVelocity:   { value: 0 },
+        uPerspective:{ value: M ? 220.0 : 260.0 },
       },
       vertexShader: /* glsl */`
         uniform float uTime;
         uniform float uPixelRatio;
         uniform float uScatter;
+        uniform float uScroll;
+        uniform float uVelocity;
+        uniform float uPerspective;
 
+        attribute vec3  aScatterPos;
         attribute vec3  aColor;
         attribute float aSize;
         attribute float aPhase;
@@ -202,41 +222,50 @@ export default function Scene3D() {
         varying float vAlpha;
 
         void main() {
-          vec3 p = position;
+          // Re-ignition collapse at bottom footer (scroll > 0.82)
+          float reignite = smoothstep(0.82, 0.98, uScroll);
+          vec3 starPos = position * 0.42;
 
-          // ── Fire physics only while in flame form ──────────────
-          float flameness = 1.0 - uScatter;
+          vec3 baseP = mix(position, aScatterPos, uScatter);
+          vec3 p = mix(baseP, starPos, reignite);
 
-          // 1) Upward flicker: tip particles rise fastest
-          float riseAmp = aHeight * aHeight * 0.055 * flameness;
-          p.y += sin(uTime * aSpeed * 2.8 + aPhase) * riseAmp;
+          float flameness = (1.0 - uScatter) * (1.0 - reignite);
+          float velBoost = clamp(abs(uVelocity) * 2.5, 0.0, 3.0);
 
-          // 2) Side sway: stronger near tip, sine-wave
-          float swayAmp = (0.8 - aHeight * 0.5) * 0.030 * flameness;
-          p.x += sin(uTime * 2.0 + aPhase + p.y * 1.8) * swayAmp;
+          // 1) Dynamic upward rising flame tongues + velocity wind draft
+          float riseAmp = (aHeight * aHeight * 0.065 + velBoost * 0.040) * (flameness + reignite * 0.7);
+          p.y += sin(uTime * (aSpeed * 3.2 + velBoost) + aPhase) * riseAmp;
 
-          // 3) Depth shimmer
-          p.z += sin(uTime * 1.4 + aPhase) * 0.014 * flameness;
+          // 2) 3D Volumetric helical swirl (swirls faster on scroll)
+          float twist = p.y * 1.4 + uScroll * 4.5 + aPhase;
+          float swayAmp = (0.88 - aHeight * 0.42) * 0.042 * (flameness + reignite * 0.6);
+          p.x += sin(uTime * 2.4 + twist) * swayAmp;
+          p.z += cos(uTime * 2.0 + twist) * (swayAmp * 0.85);
 
-          // ── Scattered: particles slowly drift (as glowing embers) 
-          float scatterDrift = uScatter;
-          p.y += sin(uTime * 0.6 + aPhase) * 0.08 * scatterDrift;
-          p.x += cos(uTime * 0.5 + aPhase * 1.3) * 0.06 * scatterDrift;
+          // 3) Cosmic drift when exploded
+          float scatterDrift = uScatter * (1.0 - reignite);
+          p.y += sin(uTime * 0.8 + aPhase) * 0.15 * scatterDrift + uVelocity * 0.25;
+          p.x += cos(uTime * 0.6 + aPhase * 1.3) * 0.12 * scatterDrift;
+          p.z += sin(uTime * 0.5 + aPhase * 0.9) * 0.12 * scatterDrift;
 
           vec4 mvp = modelViewMatrix * vec4(p, 1.0);
 
-          // ── Sparkle: sharp diamond twinkle ─────────────────────
-          float s = sin(uTime * (2.2 + aSpeed * 3.5) + aPhase * 6.28);
+          // 4) Diamond twinkle sparkle
+          float s = sin(uTime * (2.8 + aSpeed * 3.5 + velBoost * 2.0) + aPhase * 6.28);
           vSparkle = clamp(s * s * s * s, 0.0, 1.0);
 
-          // Scattered particles are dimmer (long-distance embers)
-          vAlpha = mix(1.0, 0.35 + aHeight * 0.5, uScatter);
-          vColor = aColor;
+          // Dynamic color temperature
+          vec3 activeCol = aColor;
+          if (reignite > 0.0) {
+            activeCol = mix(activeCol, vec3(1.0, 0.96, 0.82), reignite * 0.65);
+          }
+          vColor = activeCol;
+          vAlpha = mix(1.0, 0.42 + aHeight * 0.45, uScatter * (1.0 - reignite * 0.85));
 
-          float szMul = 1.0 + vSparkle * 2.0;
-          // Scattered particles shrink slightly (perspective depth)
-          szMul *= mix(1.0, 0.65, uScatter);
-          gl_PointSize = aSize * szMul * uPixelRatio * (260.0 / -mvp.z);
+          float szMul = 1.0 + vSparkle * (2.2 + velBoost * 0.6);
+          szMul *= mix(1.0, 0.72, uScatter * (1.0 - reignite));
+
+          gl_PointSize = aSize * szMul * uPixelRatio * (uPerspective / -mvp.z);
           gl_Position  = projectionMatrix * mvp;
         }
       `,
@@ -250,17 +279,17 @@ export default function Scene3D() {
           float dist = length(uv);
           if (dist > 0.5) discard;
 
-          // Smooth radial glow
+          // Smooth radial intensity core
           float core = pow(1.0 - smoothstep(0.0, 0.50, dist), 1.6);
 
           // 4-point diamond sparkle spike
-          float sH = max(0.0, 1.0 - abs(uv.y) * 20.0) * max(0.0, 1.0 - abs(uv.x) * 3.2);
-          float sV = max(0.0, 1.0 - abs(uv.x) * 20.0) * max(0.0, 1.0 - abs(uv.y) * 3.2);
-          float spike = (sH + sV) * vSparkle * 0.90;
+          float sH = max(0.0, 1.0 - abs(uv.y) * 18.0) * max(0.0, 1.0 - abs(uv.x) * 3.4);
+          float sV = max(0.0, 1.0 - abs(uv.x) * 18.0) * max(0.0, 1.0 - abs(uv.y) * 3.4);
+          float spike = (sH + sV) * vSparkle * 0.95;
 
-          vec3 hotWhite = vec3(1.0, 0.96, 0.80);
-          vec3 col = mix(vColor, hotWhite, vSparkle * 0.80 + spike * 0.55);
-          float alpha = clamp((core * 1.1 + spike * 1.3) * vAlpha, 0.0, 1.0);
+          vec3 hotWhite = vec3(1.0, 0.98, 0.90);
+          vec3 col = mix(vColor, hotWhite, vSparkle * 0.85 + spike * 0.60);
+          float alpha = clamp((core * 1.15 + spike * 1.35) * vAlpha, 0.0, 1.0);
           gl_FragColor = vec4(col, alpha);
         }
       `,
@@ -273,97 +302,146 @@ export default function Scene3D() {
     group.add(new THREE.Points(geo, mat));
     scene.add(group);
 
-    // ── Ambient ember field (always visible, drifts upward) ───────
-    const EC = M ? 220 : 480;
+    // ── Ambient Drifting Cosmic Embers ────────────────────────────
+    const EC = M ? 90 : 360;
     const ePos = new Float32Array(EC * 3);
     const eVel = new Float32Array(EC);
     const eWig = new Float32Array(EC);
-    const eBri = new Float32Array(EC); // brightness
     for (let i = 0; i < EC; i++) {
-      ePos[i * 3]     = (rnd() - 0.5) * 32;
+      ePos[i * 3]     = (rnd() - 0.5) * 26;
       ePos[i * 3 + 1] = rnd() * 22 - 11;
-      ePos[i * 3 + 2] = 1 - rnd() * 40;
-      eVel[i] = 0.008 + rnd() * 0.022;
+      ePos[i * 3 + 2] = 1 - rnd() * 32;
+      eVel[i] = 0.010 + rnd() * 0.022;
       eWig[i] = rnd() * Math.PI * 2;
-      eBri[i] = 0.3 + rnd() * 0.7;
     }
     const eGeo = new THREE.BufferGeometry();
     eGeo.setAttribute("position", new THREE.BufferAttribute(ePos, 3));
     const eMat = new THREE.PointsMaterial({
-      size: 0.038, color: 0xff7711,
-      transparent: true, opacity: 0.55,
-      blending: THREE.AdditiveBlending, depthWrite: false,
+      size: M ? 0.040 : 0.038,
+      color: 0xff8811,
+      transparent: true,
+      opacity: 0.60,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
     const emberMesh = new THREE.Points(eGeo, eMat);
     scene.add(emberMesh);
 
-    // ── Mouse parallax ────────────────────────────────────────────
+    // ── Interactive 3D Touch & Pointer Dynamics ───────────────────
     let mx = 0, my = 0, smx = 0, smy = 0;
-    const onPtr = (e: PointerEvent) => {
-      mx = (e.clientX / innerWidth)  * 2 - 1;
-      my = (e.clientY / innerHeight) * 2 - 1;
-    };
-    window.addEventListener("pointermove", onPtr, { passive: true });
 
-    // ── Scroll-driven layout ──────────────────────────────────────
-    // scroll 0→0.25: flame logo at rest, gentle right offset
-    // scroll 0.25→0.6: flame explodes → particles scatter outward
-    // scroll 0.6→1.0: full scatter — embers fill the void, slow drift
-    const LOGO_X = M ? 0 : 2.1;
-    const LOGO_Y = M ? 1.0 : 0.0;
-    const LOGO_S = M ? 2.5 : 2.85;
+    const onPtr = (e: PointerEvent) => {
+      mx = (e.clientX / window.innerWidth) * 2 - 1;
+      my = (e.clientY / window.innerHeight) * 2 - 1;
+    };
+    const onTouch = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        mx = (e.touches[0].clientX / window.innerWidth) * 2 - 1;
+        my = (e.touches[0].clientY / window.innerHeight) * 2 - 1;
+      }
+    };
+
+    window.addEventListener("pointermove", onPtr, { passive: true });
+    window.addEventListener("touchmove", onTouch, { passive: true });
+    window.addEventListener("touchstart", onTouch, { passive: true });
 
     const clock = new THREE.Clock();
     let scrollCur = 0;
+    let velCur = 0;
     let animId = 0;
+    let firstFrameDone = false;
 
-    const smooth = (x: number) => x * x * (3 - 2 * x); // smoothstep
+    const smooth = (x: number) => x * x * (3 - 2 * x);
 
     const loop = () => {
       animId = requestAnimationFrame(loop);
       const t = R ? 0 : clock.getElapsedTime();
 
-      mat.uniforms.uTime.value = t;
-      scrollCur += (sc.p - scrollCur) * (R ? 1 : 0.055);
-      smx += (mx - smx) * 0.04;
-      smy += (my - smy) * 0.04;
+      // Smooth scroll progress & velocity dampening
+      scrollCur += (sc.p - scrollCur) * (R ? 1 : 0.075);
+      velCur += (sc.v - velCur) * 0.18;
+      sc.v *= 0.90; // natural friction decay
 
-      // ── Scatter factor: 0 when scroll<0.25, rises to 1 at 0.65
-      const scatterRaw = Math.max(0, Math.min(1, (scrollCur - 0.22) / 0.38));
-      const scatter    = smooth(scatterRaw);
+      mat.uniforms.uTime.value = t;
+      mat.uniforms.uScroll.value = scrollCur;
+      mat.uniforms.uVelocity.value = velCur;
+      smx += (mx - smx) * 0.045;
+      smy += (my - smy) * 0.045;
+
+      const isMob = window.innerWidth < 768;
+
+      // ── Scatter factor: explosion on scroll (starts early at 0.10) ──
+      const scatterRaw = Math.max(0, Math.min(1, (scrollCur - 0.10) / 0.32));
+      const scatter = smooth(scatterRaw);
       mat.uniforms.uScatter.value = scatter;
 
-      // ── CPU morph: lerp each particle from rest → scatter pos ──
-      for (let k = 0; k < N * 3; k++) {
-        livePos[k] = restPos[k] + (scatterPos[k] - restPos[k]) * scatter;
-      }
-      geo.attributes.position.needsUpdate = true;
+      // ── Full-Page Multi-Stage 3D Choreography ──────────────────
+      let targetX = isMob ? 0.0 : 2.15;
+      let targetY = isMob ? 0.36 : 0.0;
+      let targetScale = isMob ? 1.55 : 2.85;
 
-      // ── Group transform ────────────────────────────────────────
-      const posX  = (LOGO_X + smx * 0.4) * (1 - scatter * 0.5);
-      const posY  = (LOGO_Y - smy * 0.28) * (1 - scatter * 0.4);
-      const scale = LOGO_S * (1 - scatter * 0.35) * (1 + Math.sin(t * 1.3) * 0.022);
-      const rotY  = t * 0.14 * (1 - scatter * 0.8) + smx * 0.30;
-      const rotZ  = Math.sin(t * 0.7) * 0.035 * (1 - scatter);
+      // Stage 1 (Capabilities / Services, scroll 0.12 - 0.38): accelerates, shifts and sheds sparks
+      if (scrollCur > 0.12 && scrollCur <= 0.38) {
+        const u = (scrollCur - 0.12) / 0.26;
+        targetX = isMob ? (Math.sin(u * Math.PI) * 0.25) : (2.15 - u * 1.5);
+        targetY = isMob ? (0.36 - u * 0.25) : (-u * 0.25);
+        targetScale *= (1 + Math.sin(u * Math.PI) * 0.18);
+      }
+      // Stage 2 (Flagship Showcase, scroll 0.38 - 0.72): expansive 3D cosmic background field
+      else if (scrollCur > 0.38 && scrollCur <= 0.72) {
+        const u = (scrollCur - 0.38) / 0.34;
+        targetX = isMob ? 0.0 : 0.4;
+        targetY = isMob ? (0.1 - u * 0.2) : 0.0;
+        targetScale *= 1.30;
+      }
+      // Stage 3 (CTA & Re-ignition, scroll > 0.72): collapses into glowing white-hot star at bottom
+      else if (scrollCur > 0.72) {
+        const u = (scrollCur - 0.72) / 0.28;
+        targetX = 0.0;
+        targetY = isMob ? (-0.35 * u) : (-0.25 * u);
+        targetScale = isMob ? (1.55 * (1 + u * 0.35)) : (2.85 * (1 + u * 0.25));
+      }
+
+      const posX  = targetX + smx * (isMob ? 0.22 : 0.38);
+      const posY  = targetY - smy * (isMob ? 0.18 : 0.28) + (velCur * 0.12);
+      const scale = targetScale * (1 + Math.sin(t * 1.5) * 0.020 + Math.min(0.2, Math.abs(velCur) * 0.04));
+
+      // Multi-axis 3D continuous rotation fueled by scroll + time + pointer tilt
+      const scrollRotation = scrollCur * Math.PI * 2.8;
+      const rotY  = (isMob ? Math.sin(t * 0.6) * 0.22 : t * 0.16) + scrollRotation * 0.6 + smx * (isMob ? 0.48 : 0.30);
+      const rotX  = -smy * (isMob ? 0.30 : 0.14) + Math.sin(t * 0.8 + scrollCur * 4.0) * 0.08 - (velCur * 0.06);
+      const rotZ  = Math.sin(t * 0.7 + scrollCur * 2.0) * 0.05 + scrollCur * 0.25;
 
       group.position.set(posX, posY, 0);
       group.scale.setScalar(scale);
-      group.rotation.set(-smy * 0.12 * (1 - scatter), rotY, rotZ);
+      group.rotation.set(rotX, rotY, rotZ);
 
-      // ── Embers ────────────────────────────────────────────────
+      // ── Ambient Rising Embers (Accelerates with scroll velocity) ──
       const ep = eGeo.attributes.position.array as Float32Array;
+      const emberVelMultiplier = 1 + Math.abs(velCur) * 3.5 + scatter * 2.0;
       for (let i = 0; i < EC; i++) {
-        ep[i * 3 + 1] += eVel[i] * (1 + scatter * 2.0); // faster when scattered
-        ep[i * 3]     += Math.sin(t * 0.85 + eWig[i]) * 0.004;
+        ep[i * 3 + 1] += eVel[i] * emberVelMultiplier;
+        ep[i * 3]     += Math.sin(t * 0.9 + eWig[i]) * 0.004;
         if (ep[i * 3 + 1] > 11) ep[i * 3 + 1] = -11;
       }
       eGeo.attributes.position.needsUpdate = true;
-      eMat.opacity = 0.45 + scatter * 0.45; // embers become brighter as scatter grows
+      eMat.opacity = 0.45 + scatter * 0.40 + Math.min(0.3, Math.abs(velCur) * 0.2);
 
-      // ── Camera subtle parallax ─────────────────────────────────
-      camera.position.set(smx * 0.4, -smy * 0.28, 7.0);
-      camera.rotation.set(-smy * 0.025, -smx * 0.03, scrollCur * 0.8 * (1 - scatter * 0.7));
+      // ── Camera Subtle 3D Perspective Parallax on Scroll ──────
+      const camZ = isMob ? (6.4 - scrollCur * 1.0) : (7.0 - scrollCur * 1.2);
+      camera.position.set(
+        smx * (isMob ? 0.18 : 0.32) + Math.sin(scrollCur * Math.PI) * 0.35,
+        -smy * (isMob ? 0.14 : 0.24) - scrollCur * 0.4,
+        camZ
+      );
+      camera.rotation.set(-smy * 0.016, -smx * 0.020, scrollCur * 0.6);
       renderer.render(scene, camera);
+
+      if (!firstFrameDone) {
+        firstFrameDone = true;
+        setVisible(true);
+        onReady?.();
+      }
     };
     loop();
 
@@ -371,16 +449,27 @@ export default function Scene3D() {
       cancelAnimationFrame(animId);
       window.removeEventListener("resize", resize);
       window.removeEventListener("pointermove", onPtr);
-      geo.dispose(); eGeo.dispose(); mat.dispose(); eMat.dispose();
+      window.removeEventListener("touchmove", onTouch);
+      window.removeEventListener("touchstart", onTouch);
+      geo.dispose();
+      eGeo.dispose();
+      mat.dispose();
+      eMat.dispose();
       renderer.dispose();
     };
-  }, []);
+  }, [onReady]);
 
   return (
     <canvas
       ref={ref}
       aria-hidden
       className="fixed inset-0 z-0 h-full w-full pointer-events-none"
+      style={{
+        opacity: visible ? 1 : 0,
+        transition: "opacity 1.0s ease",
+      }}
     />
   );
 }
+
+
